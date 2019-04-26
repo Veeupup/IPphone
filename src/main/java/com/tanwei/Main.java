@@ -6,8 +6,7 @@ import com.tanwei.phone.ServerMe;
 public class Main {
 
     public static void main(String[] args) {
-        new ServerMe();
-        new ClientMe();
+
     }
 
 }

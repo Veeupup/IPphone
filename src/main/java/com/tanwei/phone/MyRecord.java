@@ -10,10 +10,28 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.net.*;
+import java.util.Arrays;
+
+/**
+ * 这里应该是整个IP电话的客户端
+ *
+ * 1.当我们打开客户端的时候，应该开启UDP和TCP端口等待连接
+ *
+ * 2.当主动拨号的时候，使用TCP首先建立连接，然后UDP传送数据
+ *
+ * 3.连接成功后，开始接收数据，然后播放
+ *
+ * 由于 UDP 是以数据报的方式传送，所以我们不能直接将音频输入流传送
+ *
+ * 而是将输入的音频流分成多个数据报分别来发送
+ *
+ * 这个类UDP的客户端，应该改造成首先TCP，然后UDP传输数据
+ *
+ */
 
 public class MyRecord extends JFrame implements ActionListener {
 
-    //客户端在9000端口监听接收到的数据
+    //客户端在9000端口监听接收到的数据，这是UDP传送的端口
     DatagramSocket ds = new DatagramSocket(9000);
     InetAddress loc = InetAddress.getLocalHost();
     // 建立接收缓冲
@@ -96,7 +114,7 @@ public class MyRecord extends JFrame implements ActionListener {
         this.setLocationRelativeTo(null);
         this.setVisible(true);
 
-        // UDP
+        // 开始监听自己的 TCP 和 UDP 端口,并且播放
 
     }
 
@@ -133,7 +151,7 @@ public class MyRecord extends JFrame implements ActionListener {
         }
 
     }
-    //开始录音
+    //开始通话，捕捉 麦克风 获取音频流的数据
     public void capture()
     {
         try {
@@ -283,13 +301,16 @@ public class MyRecord extends JFrame implements ActionListener {
         //重写run函数
         public void run() {
             // 定义发送的数据报
-            DatagramPacket dp_send = new DatagramPacket(bts,10000, loc, 3000);
+            DatagramPacket dp_send = new DatagramPacket(bts,1000, loc, 3000);
             DatagramPacket dp_receive = new DatagramPacket(buf, 1024);
+
+            // 设定超时时间
             try {
                 ds.setSoTimeout(5000);
             } catch (SocketException e) {
                 e.printStackTrace();
             }
+
             baos = new ByteArrayOutputStream();
             try {
                 System.out.println("ok3");
@@ -298,16 +319,21 @@ public class MyRecord extends JFrame implements ActionListener {
                 while(stopflag != true)
                 {
                     i++;
-
-                    //当停止录音没按下时，该线程一直执行
-                    //从数据行的输入缓冲区读取音频数据。
-                    //要读取bts.length长度的字节,cnt 是实际读取的字节数
+                    //  当停止通话没按下时，该线程一直执行
+                    //  从数据行的输入缓冲区读取音频数据到
+                    //  要读取bts.length长度的字节,cnt 是实际读取的字节数
+                    //  将 td 输入音频流中缓冲区的内容读取到 bts 缓存中
                     int cnt = td.read(bts, 0, bts.length);
                     if(cnt > 0)
                     {
+                        // 从数据线的输入缓冲区读取音频数据到 输出流 baos 中
+                        // 下面这一句是为了重放录音的时候，将从 td 中捕捉到的字符流保存到 baos 中
                         baos.write(bts, 0, cnt);
-                        // 如果能获取到输入流，那么就通过UDP发送
-                        ds.send(new DatagramPacket(bts,bts.length, loc, 3000));
+                        // 将 bts 数组，也就是从 td 中读取到的音频流缓冲通过 UDP 发送
+                        // 这个时候收到的内容应该是一个 byte[] 数组
+                        // 至此，发送音频流应该没问题了
+                        System.out.println(Arrays.toString(bts));
+                        ds.send(new DatagramPacket( bts, cnt, loc, 3000));
                         if(i == 10) {
                             i=0;
                             ds.send(new DatagramPacket("Sending Audio!!!".getBytes(), "Sending Audio!!!".length(), loc, 3000));
@@ -337,7 +363,7 @@ public class MyRecord extends JFrame implements ActionListener {
     //播放类,同样也做成内部类
     class Play implements Runnable
     {
-        //播放baos中的数据即可
+        //播放baos中的数据即可,我们这个时候将所有的数据都保存到了 baos 中了
         public void run() {
             byte bts[] = new byte[10000];
             try {
