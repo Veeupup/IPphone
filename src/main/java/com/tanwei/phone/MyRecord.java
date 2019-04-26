@@ -5,10 +5,7 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.IOException;
+import java.io.*;
 import java.net.*;
 import java.util.Arrays;
 
@@ -30,6 +27,14 @@ import java.util.Arrays;
  */
 
 public class MyRecord extends JFrame implements ActionListener {
+
+    static JTextArea jt_aArea=new JTextArea();
+
+    // TCP连接的输出流
+    static PrintWriter pw=null;
+
+    // 是否成功建立 TCP 连接的标志
+    volatile static boolean is_Connected = false;
 
     //客户端在9000端口监听接收到的数据，这是UDP传送的端口
     DatagramSocket ds = new DatagramSocket(9000);
@@ -53,9 +58,11 @@ public class MyRecord extends JFrame implements ActionListener {
 
 
     //定义所需要的组件
-    JPanel jp1,jp2,jp3;
+    JPanel jp1,jp3;
+    JScrollPane jp2;
     JLabel jl1=null;
-    JButton captureBtn,stopBtn,playBtn,saveBtn;
+    JButton captureBtn,stopBtn,playBtn,saveBtn, tcp_btn;
+    JTextField jtextIp;
     public static void main(String[] args) throws SocketException, UnknownHostException {
 
         //创造一个实例
@@ -64,10 +71,12 @@ public class MyRecord extends JFrame implements ActionListener {
     }
     //构造函数
     public MyRecord() throws SocketException, UnknownHostException {
+
         //组件初始化
         jp1 = new JPanel();
-        jp2 = new JPanel();
+        jp2 = new JScrollPane(jt_aArea);
         jp3 = new JPanel();
+
 
         //定义字体
         Font myFont = new Font("华文新魏",Font.BOLD,30);
@@ -75,6 +84,19 @@ public class MyRecord extends JFrame implements ActionListener {
         jl1.setFont(myFont);
         jp1.add(jl1);
 
+        // 定义输入 IP 地址，尝试用 TCP 连接
+        jtextIp = new JTextField(10);
+        // 拨号按钮
+        tcp_btn = new JButton("拨号连接");
+        tcp_btn.addActionListener(this);
+        tcp_btn.setActionCommand("tcp_btn");
+
+        jp1.add(jtextIp);
+        jp1.add(tcp_btn);
+
+
+        jt_aArea.setEditable(false);
+        // 下方按钮
         captureBtn = new JButton("开始对话");
         //对开始录音按钮进行注册监听
         captureBtn.addActionListener(this);
@@ -103,7 +125,7 @@ public class MyRecord extends JFrame implements ActionListener {
         jp3.add(playBtn);
         jp3.add(saveBtn);
         //设置按钮的属性
-        captureBtn.setEnabled(true);
+        captureBtn.setEnabled(false);
         stopBtn.setEnabled(false);
         playBtn.setEnabled(false);
         saveBtn.setEnabled(false);
@@ -148,6 +170,14 @@ public class MyRecord extends JFrame implements ActionListener {
         {
             //调用保存录音的方法
             save();
+        }else if(e.getActionCommand().equals("tcp_btn"))
+        {
+            // 对输入的IP拨号
+            String ip = jtextIp.getText();
+            jt_aArea.append("尝试连接"+ip+"\r\n");
+            Call call = new Call(ip);
+            Thread t1 = new Thread(call);
+            t1.start();
         }
 
     }
@@ -389,4 +419,53 @@ public class MyRecord extends JFrame implements ActionListener {
 
         }
     }
+
+    // TCP拨号连接线程
+    // TCP 拨号，单独用一个线程来拨号
+    class Call implements Runnable
+    {
+        private String ip;
+        Call(String ip) {
+            this.ip = ip;
+        }
+        // 拨号
+        public void run() {
+            try {
+                jt_aArea.append("尝试连接"+ip+"\r\n");
+                // 默认连接对方的 9999 端口,这是规定的每个人的TCP端口
+                // 只有连接成功，才能进行下一步的 UDP 传送数据
+                Socket s=new Socket(ip,9999);
+                InputStreamReader isr=new InputStreamReader(s.getInputStream());
+                BufferedReader br=new BufferedReader(isr);
+                pw=new PrintWriter(s.getOutputStream(),true);
+                jt_aArea.append("连接成功"+ip+"\r\n");
+                InetAddress myip = InetAddress.getLocalHost();
+                pw.println(myip+"向您发起连接\r\n");
+
+                // TCP 连接成功后，才能开始通话
+                is_Connected = true;
+                captureBtn.setEnabled(true);
+                while(true){
+                    //不停的读取
+                    String info=br.readLine();
+                    jt_aArea.append("服务器端："+info+"\r\n");//换行
+                }
+            } catch (UnknownHostException e) {
+                jt_aArea.append("IP输入有误！请检查后重新输入！"+"\r\n");
+                System.out.println("IP输入有误！请检查后重新输入！");
+            }
+            catch (NoRouteToHostException e) {
+                jt_aArea.append("IP输入不可达！请检查后重新输入！"+"\r\n");
+                System.out.println("IP输入不可达！请检查后重新输入！");
+            }
+            catch (Exception e) {
+                e.printStackTrace();
+                // 出现异常，则断开连接标志
+                is_Connected = false;
+                captureBtn.setEnabled(false);
+            }
+        }
+    }
+
+
 }

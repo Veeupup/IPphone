@@ -39,10 +39,11 @@ public class ServerMe extends JFrame implements ActionListener, KeyListener {
             BufferedReader br=new BufferedReader(isr);
             pw=new PrintWriter(s.getOutputStream(),true);
         //读取从客户端发送来的信息
-            while(true){
-                String info =br.readLine();
-                jt_aArea.append("客户端："+info+"\r\n");
-            }
+        // 这里暂时不需要，因为TCP连接只是给我们起到了最开始连接的作用
+//            while(true){
+//                String info =br.readLine();
+//                jt_aArea.append("客户端："+info+"\r\n");
+//            }
         } catch (Exception e) {
             System.out.println("连接失败");
         }
