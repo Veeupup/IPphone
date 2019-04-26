@@ -14,6 +14,7 @@ import java.util.Scanner;
 
 /**
  * 这是通信后，能够收到语音消息的UDP类
+ * 同时在这里可以发送我们的语音消息
  * 被动接收UDP数据
  * 监听3000端口
  */
@@ -46,7 +47,7 @@ public class UDPServer {
             // 现在这样做有一点问题，就是每次接收到数据的长度不一样，
             // 然后每次都要开启一个新的线程来播放，等下得改
             udpServer.play(byte_receive);
-            //数据发动到客户端的3000端口
+            //数据发动到连接端的9000端口
             DatagramPacket dp_send= new DatagramPacket(str_send.getBytes(),str_send.length(),dp_receive.getAddress(),9000);
             ds.send(dp_send);
             //由于dp_receive在接收了数据之后，其内部消息长度值会变为实际接收的消息的字节数，

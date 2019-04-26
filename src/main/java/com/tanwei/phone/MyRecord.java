@@ -8,6 +8,8 @@ import java.awt.event.ActionListener;
 import java.io.*;
 import java.net.*;
 import java.util.Arrays;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * 这里应该是整个IP电话的客户端
@@ -28,6 +30,9 @@ import java.util.Arrays;
 
 public class MyRecord extends JFrame implements ActionListener {
 
+    // 新建线程池来处理 拨号、连接、播放音频等线程
+    ExecutorService cachedThreadPool = Executors.newCachedThreadPool();
+
     static JTextArea jt_aArea=new JTextArea();
 
     // TCP连接的输出流
@@ -36,9 +41,10 @@ public class MyRecord extends JFrame implements ActionListener {
     // 是否成功建立 TCP 连接的标志
     volatile static boolean is_Connected = false;
 
-    //客户端在9000端口监听接收到的数据，这是UDP传送的端口
+    //客户端在9000端口监听接收到的数据，这是UDP发送的端口
     DatagramSocket ds = new DatagramSocket(9000);
     InetAddress loc = InetAddress.getLocalHost();
+
     // 建立接收缓冲
     byte[] buf = new byte[1024];
 
@@ -136,8 +142,14 @@ public class MyRecord extends JFrame implements ActionListener {
         this.setLocationRelativeTo(null);
         this.setVisible(true);
 
-        // 开始监听自己的 TCP 和 UDP 端口,并且播放
+        // 开始监听自己的 9999 端口，等待其他用户连接
+        Server server = new Server();
+        // 将自己本机连接的线程放到线程池中运行
+        cachedThreadPool.execute(server);
 
+        // UDP接收端口
+        UDPServer udpServer = new UDPServer();
+        cachedThreadPool.execute(udpServer);
     }
 
     public void actionPerformed(ActionEvent e) {
@@ -151,8 +163,16 @@ public class MyRecord extends JFrame implements ActionListener {
             playBtn.setEnabled(false);
             saveBtn.setEnabled(false);
 
-            //调用录音的方法
-            capture();
+            // 获取对方的对方的 IP 并且向这个IP发送音频流数据
+            String ip = jtextIp.getText();
+            try {
+                InetAddress to_ip = InetAddress.getByName(ip);
+                //调用录音的方法
+                capture(to_ip);
+            } catch (UnknownHostException e1) {
+                e1.printStackTrace();
+            }
+
         }else if (e.getActionCommand().equals("stopBtn")) {
             //点击停止录音按钮的动作
             captureBtn.setEnabled(true);
@@ -175,9 +195,9 @@ public class MyRecord extends JFrame implements ActionListener {
             // 对输入的IP拨号
             String ip = jtextIp.getText();
             jt_aArea.append("尝试连接"+ip+"\r\n");
+            // 在线程池中开启线程来拨号
             Call call = new Call(ip);
-            Thread t1 = new Thread(call);
-            t1.start();
+            cachedThreadPool.execute(call);
         }
 
     }
@@ -196,20 +216,44 @@ public class MyRecord extends JFrame implements ActionListener {
 
             //创建播放录音的线程
             Record record = new Record();
-            Thread t1 = new Thread(record);
-            t1.start();
+            cachedThreadPool.execute(record);
 
         } catch (LineUnavailableException ex) {
             ex.printStackTrace();
             return;
         }
     }
+
+    //开始通话，捕捉 麦克风 获取音频流的数据
+    public void capture(InetAddress ip)
+    {
+        try {
+            //af为AudioFormat也就是音频格式
+            af = getAudioFormat();
+            DataLine.Info info = new DataLine.Info(TargetDataLine.class,af);
+            td = (TargetDataLine)(AudioSystem.getLine(info));
+            //打开具有指定格式的行，这样可使行获得所有所需的系统资源并变得可操作。
+            td.open(af);
+            //允许某一数据行执行数据 I/O
+            td.start();
+
+            //创建播放录音的线程
+            Record record = new Record(ip);
+            cachedThreadPool.execute(record);
+
+        } catch (LineUnavailableException ex) {
+            ex.printStackTrace();
+            return;
+        }
+    }
+
     //停止录音
     public void stop()
     {
         stopflag = true;
     }
-    //播放录音
+
+    //播放录音,这是本机的录音，保存到缓存中
     public void play()
     {
         //将baos中的数据转换为字节数据
@@ -226,8 +270,7 @@ public class MyRecord extends JFrame implements ActionListener {
             sd.start();
             //创建播放进程
             Play py = new Play();
-            Thread t2 = new Thread(py);
-            t2.start();
+            cachedThreadPool.execute(py);
         } catch (Exception e) {
             e.printStackTrace();
         }finally{
@@ -252,6 +295,46 @@ public class MyRecord extends JFrame implements ActionListener {
         }
 
     }
+
+    // 重载play方法，这是播放从UDP报文中获取到的报文
+    public void play(byte[] audioData)
+    {
+        //  将接收到的 byte[] 转换为输入流，然后才能去播放
+        //  byte audioData[] = baos.toByteArray();
+        //转换为输入流
+        bais = new ByteArrayInputStream(audioData);
+        af = getAudioFormat();
+        ais = new AudioInputStream(bais, af, audioData.length/af.getFrameSize());
+
+        try {
+            DataLine.Info dataLineInfo = new DataLine.Info(SourceDataLine.class, af);
+            sd = (SourceDataLine) AudioSystem.getLine(dataLineInfo);
+            sd.open(af);
+            sd.start();
+            //创建播放进程
+            Play py = new Play();
+            cachedThreadPool.execute(py);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }finally{
+            try {
+                //关闭流
+                if(ais != null)
+                {
+                    ais.close();
+                }
+                if(bais != null)
+                {
+                    bais.close();
+                }
+
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+
+    }
+
     //保存录音
     public void save()
     {
@@ -267,7 +350,7 @@ public class MyRecord extends JFrame implements ActionListener {
         try {
             //以当前的时间命名录音的名字
             //将录音的文件存放到F盘下语音文件夹下
-            File filePath = new File("F:/语音文件");
+            File filePath = new File("./audio");
             if(!filePath.exists())
             {//如果文件不存在，则创建该目录
                 filePath.mkdir();
@@ -324,22 +407,23 @@ public class MyRecord extends JFrame implements ActionListener {
     // 此时，我们将捕捉到的音频字符数组通过 UDP 发送
     class Record implements Runnable
     {
+        InetAddress ip;
+        Record() {}
+
+        Record(InetAddress ip) {
+            this.ip = ip;
+        }
 
         //定义存放录音的字节数组,作为缓冲区
         byte bts[] = new byte[10000];
         //将字节数组包装到流里，最终存入到baos中
         //重写run函数
         public void run() {
+            System.out.println("开始录音");
+//            System.out.println(loc);
             // 定义发送的数据报
-            DatagramPacket dp_send = new DatagramPacket(bts,1000, loc, 3000);
+            DatagramPacket dp_send = new DatagramPacket(bts,1000, ip, 3000);
             DatagramPacket dp_receive = new DatagramPacket(buf, 1024);
-
-            // 设定超时时间
-            try {
-                ds.setSoTimeout(5000);
-            } catch (SocketException e) {
-                e.printStackTrace();
-            }
 
             baos = new ByteArrayOutputStream();
             try {
@@ -362,11 +446,12 @@ public class MyRecord extends JFrame implements ActionListener {
                         // 将 bts 数组，也就是从 td 中读取到的音频流缓冲通过 UDP 发送
                         // 这个时候收到的内容应该是一个 byte[] 数组
                         // 至此，发送音频流应该没问题了
+                        System.out.println("本地捕获到的字符流为：");
                         System.out.println(Arrays.toString(bts));
-                        ds.send(new DatagramPacket( bts, cnt, loc, 3000));
+                        ds.send(new DatagramPacket( bts, cnt, ip, 3000));
                         if(i == 10) {
                             i=0;
-                            ds.send(new DatagramPacket("Sending Audio!!!".getBytes(), "Sending Audio!!!".length(), loc, 3000));
+                            ds.send(new DatagramPacket("Sending Audio!!!".getBytes(), "Sending Audio!!!".length(), ip, 3000));
                         }
                     }
 
@@ -408,19 +493,49 @@ public class MyRecord extends JFrame implements ActionListener {
                         sd.write(bts, 0, cnt);
                     }
                 }
-
             } catch (Exception e) {
                 e.printStackTrace();
             }finally{
                 sd.drain();
                 sd.close();
             }
+        }
+    }
 
+    //  将本机作为服务端，开启 9999 端口等待连接
+    class Server implements Runnable
+    {
+        // 默认开启 9999 端口
+        private int port = 9999;
+        Server() {}
+        // 可以指定端口
+        Server(int port) {
+            this.port = port;
+        }
+        public void run() {
+            try {
+                // 开启本机 9999 端口等待其他客户端连接
+                ServerSocket ss = new ServerSocket(port);
+                jt_aArea.append("本机服务端启动……"+"端口为"+port+"\r\n");
+                // 这个方法将会阻塞，一直等待其他的用户连接，然后才会继续进行
+                Socket s =  ss.accept();
+                // 运行到这里，说明已经有用户连接上，那么开启自己的音频捕捉，并且向对方发送语音
+                String other_ip = s.getRemoteSocketAddress().toString().split(":")[0].substring(1);
+                InetAddress ip = InetAddress.getByName(other_ip);
+                System.out.println("对方的IP是"+other_ip+"\r\n");
+                // 这个时候获取本地的音频
+                capture(ip);
+                InputStreamReader isr=new InputStreamReader(s.getInputStream());
+                BufferedReader br=new BufferedReader(isr);
+                pw=new PrintWriter(s.getOutputStream(),true);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
 
         }
     }
 
-    // TCP拨号连接线程
+    // TCP拨号连接线程,这是作为拨号端,新建线程进行拨号
     // TCP 拨号，单独用一个线程来拨号
     class Call implements Runnable
     {
@@ -465,6 +580,62 @@ public class MyRecord extends JFrame implements ActionListener {
                 captureBtn.setEnabled(false);
             }
         }
+    }
+
+
+    // UDP 接收服务
+    // 现在已经能向某个用户连接并且发送音频了
+    class UDPServer implements Runnable {
+
+        // 当收到连接之后，开启此线程，然后从这里获取 UDP 发送的报文
+        // 同时，从自己本机捕捉音频，将音频输出流转换为字符数组然后通过 UDP 发送
+        public void run() {
+            String str_send = "Hello UDPclient";
+            byte[] buf = new byte[10000];
+            //服务端在3000端口监听接收到的数据
+            // 客户端接收UDP的端口
+            DatagramSocket ds_receive = null;
+            try {
+                ds_receive = new DatagramSocket(3000);
+            } catch (SocketException e) {
+                e.printStackTrace();
+            }
+            //接收从客户端发送过来的数据
+            DatagramPacket dp_receive = new DatagramPacket(buf, 10000);
+            System.out.println("server is on，waiting for client to send data......");
+            boolean f = true;
+            int i=0;
+            while(f){
+                try{
+                    //服务器端接收来自客户端的数据
+                    ds_receive.receive(dp_receive);
+                    System.out.println("第："+i++ + "次收到UDP数据报，说明确实是按照缓冲来发送的，以下是接收到的字符流");
+//            String str_receive = dp_receive.getData();
+                    byte[] byte_receive = dp_receive.getData();
+                    // 打印一下接收到的字节数组，看和发送的UDP数据报二者是否相同
+                    System.out.println(Arrays.toString( dp_receive.getData()));
+
+                    // 现在这样做有一点问题，就是每次接收到数据的长度不一样，
+                    // 然后每次都要开启一个新的线程来播放，等下得改
+                    play(byte_receive);
+                    //数据发动到连接端的9000端口
+                    DatagramPacket dp_send= new DatagramPacket(str_send.getBytes(),str_send.length(),dp_receive.getAddress(),9000);
+                    try {
+                        ds_receive.send(dp_send);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                    //由于dp_receive在接收了数据之后，其内部消息长度值会变为实际接收的消息的字节数，
+                    //所以这里要将dp_receive的内部消息长度重新置为10000
+                    dp_receive.setLength(10000);
+                }catch (IOException e) {
+                    e.printStackTrace();
+                }
+
+            }
+            ds.close();
+        }
+
     }
 
 
