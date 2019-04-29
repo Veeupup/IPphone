@@ -35,8 +35,14 @@ public class MyRecord extends JFrame implements ActionListener {
 
     static JTextArea jt_aArea=new JTextArea();
 
+    // 电话类定义
+    MyRecord mr;
+
     // TCP连接的输出流
     static PrintWriter pw=null;
+
+    // 是否接听电话
+    volatile int onPhone = -1;
 
     // 是否成功建立 TCP 连接的标志
     volatile static boolean is_Connected = false;
@@ -446,8 +452,8 @@ public class MyRecord extends JFrame implements ActionListener {
                         // 将 bts 数组，也就是从 td 中读取到的音频流缓冲通过 UDP 发送
                         // 这个时候收到的内容应该是一个 byte[] 数组
                         // 至此，发送音频流应该没问题了
-                        System.out.println("本地捕获到的字符流为：");
-                        System.out.println(Arrays.toString(bts));
+//                        System.out.println("本地捕获到的字符流为：");
+//                        System.out.println(Arrays.toString(bts));
                         ds.send(new DatagramPacket( bts, cnt, ip, 3000));
                         if(i == 10) {
                             i=0;
@@ -503,6 +509,7 @@ public class MyRecord extends JFrame implements ActionListener {
     }
 
     //  将本机作为服务端，开启 9999 端口等待连接
+    //  接听其他人拨打的电话
     class Server implements Runnable
     {
         // 默认开启 9999 端口
@@ -517,17 +524,45 @@ public class MyRecord extends JFrame implements ActionListener {
                 // 开启本机 9999 端口等待其他客户端连接
                 ServerSocket ss = new ServerSocket(port);
                 jt_aArea.append("本机服务端启动……"+"端口为"+port+"\r\n");
-                // 这个方法将会阻塞，一直等待其他的用户连接，然后才会继续进行
-                Socket s =  ss.accept();
-                // 运行到这里，说明已经有用户连接上，那么开启自己的音频捕捉，并且向对方发送语音
-                String other_ip = s.getRemoteSocketAddress().toString().split(":")[0].substring(1);
-                InetAddress ip = InetAddress.getByName(other_ip);
-                System.out.println("对方的IP是"+other_ip+"\r\n");
-                // 这个时候获取本地的音频
-                capture(ip);
-                InputStreamReader isr=new InputStreamReader(s.getInputStream());
-                BufferedReader br=new BufferedReader(isr);
-                pw=new PrintWriter(s.getOutputStream(),true);
+
+                while (!is_Connected) {
+                    // 这个方法将会阻塞，一直等待其他的用户连接，然后才会继续进行
+                    Socket s =  ss.accept();
+                    synchronized (Server.class) {
+                        String other_ip = s.getRemoteSocketAddress().toString().split(":")[0].substring(1);
+                        InetAddress ip = InetAddress.getByName(other_ip);
+                        System.out.println("对方的IP是"+other_ip+"\r\n");
+                        int is_connect = JOptionPane.showConfirmDialog(mr,"IP为"+ip+"的用户呼叫您","是否接听电话",0);
+                        if(is_connect == 0) {
+                            // 确定接听
+                            // 修改接听变量
+                            is_Connected = true;
+
+                            System.out.println("这个时候选择接听对方电话");
+                            jt_aArea.append("已接听"+ip+"的用户电话\r\n");
+                            // 这个时候获取本地的音频,向对方发送消息
+                            capture(ip);
+//                       InputStreamReader isr=new InputStreamReader(s.getInputStream());
+//                       BufferedReader br=new BufferedReader(isr);
+//                       pw=new PrintWriter(s.getOutputStream(),true);
+                        }else {
+                            // 拒绝对方电话
+                            System.out.println("挂断对方电话");
+                            jt_aArea.append("已拒绝"+ip+"的用户电话\r\n");
+                            // 向对方发送 goodbye 让对方直到被拒绝
+                            OutputStream out = s.getOutputStream();
+                            out.write("goodbye".getBytes());
+                            out.flush();
+                            s.shutdownInput();
+                            s.shutdownOutput();
+                        }
+                    }
+                    // 当本次通话结束之后，又重新监听
+                    is_Connected = false;
+                    System.out.println("结束一次");
+                }
+
+
             } catch (IOException e) {
                 e.printStackTrace();
             }
@@ -590,6 +625,9 @@ public class MyRecord extends JFrame implements ActionListener {
         // 当收到连接之后，开启此线程，然后从这里获取 UDP 发送的报文
         // 同时，从自己本机捕捉音频，将音频输出流转换为字符数组然后通过 UDP 发送
         public void run() {
+            while (is_Connected) {
+
+            }
             String str_send = "Hello UDPclient";
             byte[] buf = new byte[10000];
             //服务端在3000端口监听接收到的数据
@@ -600,6 +638,7 @@ public class MyRecord extends JFrame implements ActionListener {
             } catch (SocketException e) {
                 e.printStackTrace();
             }
+
             //接收从客户端发送过来的数据
             DatagramPacket dp_receive = new DatagramPacket(buf, 10000);
             System.out.println("server is on，waiting for client to send data......");
@@ -613,7 +652,7 @@ public class MyRecord extends JFrame implements ActionListener {
 //            String str_receive = dp_receive.getData();
                     byte[] byte_receive = dp_receive.getData();
                     // 打印一下接收到的字节数组，看和发送的UDP数据报二者是否相同
-                    System.out.println(Arrays.toString( dp_receive.getData()));
+//                    System.out.println(Arrays.toString( dp_receive.getData()));
 
                     // 现在这样做有一点问题，就是每次接收到数据的长度不一样，
                     // 然后每次都要开启一个新的线程来播放，等下得改
@@ -637,6 +676,5 @@ public class MyRecord extends JFrame implements ActionListener {
         }
 
     }
-
 
 }
