@@ -1,3 +1,28 @@
+/**
+ * IP电话客户端
+ *
+ * 为了便于消息传递，共享内存的方式
+ *
+ * 采用内部类的方式实现
+ *
+ * 使用 Swing 窗口构建基础GUI面板
+ *
+ * 使用线程池 cachedThreadPool 来管理多线程的运行
+ *
+ * 五个内部类功能说明：
+ *
+ * 1. class Record 将 采集到的音频输入发送 UDP 包   （线程）
+ *
+ * 2. class Play 将接收到缓冲区的字节缓冲转换成音频流输出   （线程）
+ *
+ * 3. class Call 拨打电话，向对方发送 TCP 连接请求 （线程）
+ *
+ * 4. class Server 开启 9999 端口监听 TCP 连接 （线程）
+ *
+ * 5. class UDPServer 开启 3333 端口接受收到的 UDP 包 （线程）
+ *
+ */
+
 package com.tanwei.phone;
 
 import javax.sound.sampled.*;
@@ -7,26 +32,9 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.*;
 import java.net.*;
-import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/**
- * 这里应该是整个IP电话的客户端
- *
- * 1.当我们打开客户端的时候，应该开启UDP和TCP端口等待连接
- *
- * 2.当主动拨号的时候，使用TCP首先建立连接，然后UDP传送数据
- *
- * 3.连接成功后，开始接收数据，然后播放
- *
- * 由于 UDP 是以数据报的方式传送，所以我们不能直接将音频输入流传送
- *
- * 而是将输入的音频流分成多个数据报分别来发送
- *
- * 这个类UDP的客户端，应该改造成首先TCP，然后UDP传输数据
- *
- */
 
 public class MyRecord extends JFrame implements ActionListener {
 
@@ -75,12 +83,7 @@ public class MyRecord extends JFrame implements ActionListener {
     JLabel jl1=null;
     JButton captureBtn,stopBtn,playBtn,saveBtn, tcp_btn;
     JTextField jtextIp;
-    public static void main(String[] args) throws SocketException, UnknownHostException {
 
-        //创造一个实例
-        MyRecord mr = new MyRecord();
-
-    }
     //构造函数
     public MyRecord() throws SocketException, UnknownHostException {
 
@@ -109,7 +112,7 @@ public class MyRecord extends JFrame implements ActionListener {
 
         jt_aArea.setEditable(false);
         // 下方按钮
-        captureBtn = new JButton("开始对话");
+        captureBtn = new JButton("开始通话");
         //对开始录音按钮进行注册监听
         captureBtn.addActionListener(this);
         captureBtn.setActionCommand("captureBtn");
@@ -158,6 +161,13 @@ public class MyRecord extends JFrame implements ActionListener {
         cachedThreadPool.execute(udpServer);
     }
 
+    public static void main(String[] args) throws SocketException, UnknownHostException {
+
+        //创造一个客户端实例
+        MyRecord mr = new MyRecord();
+
+    }
+
     public void actionPerformed(ActionEvent e) {
 
         if(e.getActionCommand().equals("captureBtn"))
@@ -185,7 +195,7 @@ public class MyRecord extends JFrame implements ActionListener {
             stopBtn.setEnabled(false);
             playBtn.setEnabled(true);
             saveBtn.setEnabled(true);
-            //调用停止录音的方法
+            //调用停止录音的方法，停止向对方发送数据
             stop();
 
         }else if(e.getActionCommand().equals("playBtn"))
@@ -243,7 +253,7 @@ public class MyRecord extends JFrame implements ActionListener {
             //允许某一数据行执行数据 I/O
             td.start();
 
-            //创建播放录音的线程
+            //创建发送音频流的线程
             Record record = new Record(ip);
             cachedThreadPool.execute(record);
 
@@ -299,7 +309,6 @@ public class MyRecord extends JFrame implements ActionListener {
                 e.printStackTrace();
             }
         }
-
     }
 
     // 重载play方法，这是播放从UDP报文中获取到的报文
@@ -341,7 +350,7 @@ public class MyRecord extends JFrame implements ActionListener {
 
     }
 
-    //保存录音
+    // 保存自己的录音（测试用）
     public void save()
     {
         //取得录音输入流
@@ -455,10 +464,10 @@ public class MyRecord extends JFrame implements ActionListener {
 //                        System.out.println("本地捕获到的字符流为：");
 //                        System.out.println(Arrays.toString(bts));
                         ds.send(new DatagramPacket( bts, cnt, ip, 3000));
-                        if(i == 10) {
-                            i=0;
-                            ds.send(new DatagramPacket("Sending Audio!!!".getBytes(), "Sending Audio!!!".length(), ip, 3000));
-                        }
+//                        if(i == 10) {
+//                            i=0;
+//                            ds.send(new DatagramPacket("Sending Audio!!!".getBytes(), "Sending Audio!!!".length(), ip, 3000));
+//                        }
                     }
 
                 }
@@ -558,7 +567,7 @@ public class MyRecord extends JFrame implements ActionListener {
                         }
                     }
                     // 当本次通话结束之后，又重新监听
-                    is_Connected = false;
+//                    is_Connected = false;
                     System.out.println("结束一次");
                 }
 
@@ -592,14 +601,15 @@ public class MyRecord extends JFrame implements ActionListener {
                 InetAddress myip = InetAddress.getLocalHost();
                 pw.println(myip+"向您发起连接\r\n");
 
-                // TCP 连接成功后，才能开始通话
+                // TCP 连接成功后，才能开始通话,这里是
                 is_Connected = true;
                 captureBtn.setEnabled(true);
-                while(true){
-                    //不停的读取
-                    String info=br.readLine();
-                    jt_aArea.append("服务器端："+info+"\r\n");//换行
-                }
+                // TCP 服务端读取TCP发送的数据
+//                while(true){
+//                    //不停的读取
+//                    String info=br.readLine();
+//                    jt_aArea.append("服务器端："+info+"\r\n");//换行
+//                }
             } catch (UnknownHostException e) {
                 jt_aArea.append("IP输入有误！请检查后重新输入！"+"\r\n");
                 System.out.println("IP输入有误！请检查后重新输入！");
@@ -625,9 +635,6 @@ public class MyRecord extends JFrame implements ActionListener {
         // 当收到连接之后，开启此线程，然后从这里获取 UDP 发送的报文
         // 同时，从自己本机捕捉音频，将音频输出流转换为字符数组然后通过 UDP 发送
         public void run() {
-            while (is_Connected) {
-
-            }
             String str_send = "Hello UDPclient";
             byte[] buf = new byte[10000];
             //服务端在3000端口监听接收到的数据
@@ -648,6 +655,8 @@ public class MyRecord extends JFrame implements ActionListener {
                 try{
                     //服务器端接收来自客户端的数据
                     ds_receive.receive(dp_receive);
+                    // 这里是接听之后，才选择接听消息，不然就一直循环在这里，用volatile变量来同步
+                    while (!is_Connected) {}
                     System.out.println("第："+i++ + "次收到UDP数据报，说明确实是按照缓冲来发送的，以下是接收到的字符流");
 //            String str_receive = dp_receive.getData();
                     byte[] byte_receive = dp_receive.getData();
